@@ -1,0 +1,502 @@
+import { useState } from "react";
+import { useLocation } from "wouter";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { apiRequest } from "@/lib/queryClient";
+import { useCart } from "@/hooks/useCart";
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { formatCurrency } from "@/lib/utils";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Helmet } from "react-helmet";
+
+const formSchema = z.object({
+  firstName: z.string().min(2, "First name is required"),
+  lastName: z.string().min(2, "Last name is required"),
+  email: z.string().email("Please enter a valid email"),
+  phone: z.string().min(10, "Please enter a valid phone number"),
+  address: z.string().min(5, "Address is required"),
+  city: z.string().min(2, "City is required"),
+  state: z.string().min(2, "State is required"),
+  zip: z.string().min(5, "ZIP code is required"),
+  country: z.string().min(2, "Country is required"),
+  paymentMethod: z.enum(["credit", "paypal", "apple"]),
+});
+
+type FormValues = z.infer<typeof formSchema>;
+
+const CheckoutPage = () => {
+  const [, setLocation] = useLocation();
+  const { cartItems, getCartTotal, clearCart } = useCart();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const subtotal = getCartTotal();
+  const shipping = subtotal >= 500 ? 0 : 25;
+  const total = subtotal + shipping;
+  
+  const form = useForm<FormValues>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      firstName: user?.firstName || "",
+      lastName: user?.lastName || "",
+      email: user?.email || "",
+      phone: user?.phone || "",
+      address: user?.address || "",
+      city: user?.city || "",
+      state: user?.state || "",
+      zip: user?.zip || "",
+      country: user?.country || "United States",
+      paymentMethod: "credit",
+    },
+  });
+  
+  const onSubmit = async (data: FormValues) => {
+    if (cartItems.length === 0) {
+      toast({
+        title: "Empty Cart",
+        description: "Your cart is empty. Please add items before checking out.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    try {
+      setIsSubmitting(true);
+      
+      // Create order items from cart
+      const items = cartItems.map(item => ({
+        productId: item.productId,
+        name: item.product?.name || "",
+        price: item.product?.price || 0,
+        quantity: item.quantity,
+        variant: item.variant,
+        image: item.product?.images[0] || "",
+      }));
+      
+      // Create shipping address from form data
+      const shippingAddress = {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        phone: data.phone,
+        address: data.address,
+        city: data.city,
+        state: data.state,
+        zip: data.zip,
+        country: data.country,
+      };
+      
+      // Send order to API
+      await apiRequest("POST", "/api/orders", {
+        total,
+        status: "pending",
+        shippingAddress,
+        items,
+      });
+      
+      // Clear cart after successful order
+      await clearCart();
+      
+      toast({
+        title: "Order Placed!",
+        description: "Your order has been placed successfully. Thank you for shopping with us!",
+      });
+      
+      // Redirect to success page (would be implemented in real application)
+      setTimeout(() => {
+        setLocation("/account");
+      }, 1500);
+      
+    } catch (error) {
+      toast({
+        title: "Order Failed",
+        description: "There was an error processing your order. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  
+  if (!user) {
+    return (
+      <>
+        <Helmet>
+          <title>Checkout | Pearl Blooms Jewelry</title>
+          <meta name="description" content="Securely checkout and complete your purchase. Enter shipping details and payment information to finalize your order." />
+        </Helmet>
+      
+        <div className="container mx-auto px-4 py-16">
+          <div className="max-w-2xl mx-auto text-center">
+            <h1 className="text-3xl md:text-4xl font-serif font-bold mb-4">Checkout</h1>
+            <p className="text-gray-600 mb-8">Please log in to proceed with checkout</p>
+            <Button onClick={() => setLocation('/login?redirect=checkout')}>
+              Login to Continue
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  }
+  
+  if (cartItems.length === 0) {
+    return (
+      <>
+        <Helmet>
+          <title>Checkout | Pearl Blooms Jewelry</title>
+          <meta name="description" content="Securely checkout and complete your purchase. Enter shipping details and payment information to finalize your order." />
+        </Helmet>
+      
+        <div className="container mx-auto px-4 py-16">
+          <div className="max-w-2xl mx-auto text-center">
+            <h1 className="text-3xl md:text-4xl font-serif font-bold mb-4">Checkout</h1>
+            <p className="text-gray-600 mb-8">Your cart is empty. Please add items to your cart before checking out.</p>
+            <Button onClick={() => setLocation('/products')}>
+              Shop Now
+            </Button>
+          </div>
+        </div>
+      </>
+    );
+  }
+  
+  return (
+    <>
+      <Helmet>
+        <title>Checkout | Pearl Blooms Jewelry</title>
+        <meta name="description" content="Securely checkout and complete your purchase. Enter shipping details and payment information to finalize your order." />
+      </Helmet>
+    
+      <div className="container mx-auto px-4 py-12">
+        <h1 className="text-3xl md:text-4xl font-serif font-bold mb-8 text-center">Checkout</h1>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+              <h2 className="text-xl font-medium mb-6">Shipping Information</h2>
+              
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="firstName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>First Name</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="lastName"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Last Name</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="email"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Email</FormLabel>
+                          <FormControl>
+                            <Input type="email" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone Number</FormLabel>
+                          <FormControl>
+                            <Input type="tel" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <FormField
+                    control={form.control}
+                    name="address"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Address</FormLabel>
+                        <FormControl>
+                          <Input {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                    <FormField
+                      control={form.control}
+                      name="city"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>City</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="state"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>State</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    
+                    <FormField
+                      control={form.control}
+                      name="zip"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>ZIP Code</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <FormField
+                    control={form.control}
+                    name="country"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Country</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select a country" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="United States">United States</SelectItem>
+                            <SelectItem value="Canada">Canada</SelectItem>
+                            <SelectItem value="United Kingdom">United Kingdom</SelectItem>
+                            <SelectItem value="Australia">Australia</SelectItem>
+                            <SelectItem value="France">France</SelectItem>
+                            <SelectItem value="Germany">Germany</SelectItem>
+                            <SelectItem value="Japan">Japan</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <div className="pt-6 border-t">
+                    <h2 className="text-xl font-medium mb-6">Payment Method</h2>
+                    
+                    <FormField
+                      control={form.control}
+                      name="paymentMethod"
+                      render={({ field }) => (
+                        <FormItem>
+                          <div className="space-y-4">
+                            <div 
+                              className={`border rounded-lg p-4 cursor-pointer ${
+                                field.value === 'credit' ? 'border-gold bg-gold-light/20' : 'border-gray-200 hover:border-gold'
+                              }`}
+                              onClick={() => field.onChange('credit')}
+                            >
+                              <div className="flex items-center">
+                                <div className={`w-5 h-5 rounded-full border flex-shrink-0 mr-3 ${
+                                  field.value === 'credit' ? 'border-gold bg-gold' : 'border-gray-300'
+                                }`}></div>
+                                <div className="flex items-center">
+                                  <span className="font-medium mr-3">Credit Card</span>
+                                  <div className="flex space-x-1">
+                                    <i className="ri-visa-line text-gray-400 text-xl"></i>
+                                    <i className="ri-mastercard-line text-gray-400 text-xl"></i>
+                                    <i className="ri-bank-card-line text-gray-400 text-xl"></i>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div 
+                              className={`border rounded-lg p-4 cursor-pointer ${
+                                field.value === 'paypal' ? 'border-gold bg-gold-light/20' : 'border-gray-200 hover:border-gold'
+                              }`}
+                              onClick={() => field.onChange('paypal')}
+                            >
+                              <div className="flex items-center">
+                                <div className={`w-5 h-5 rounded-full border flex-shrink-0 mr-3 ${
+                                  field.value === 'paypal' ? 'border-gold bg-gold' : 'border-gray-300'
+                                }`}></div>
+                                <div className="flex items-center">
+                                  <span className="font-medium mr-3">PayPal</span>
+                                  <i className="ri-paypal-line text-gray-400 text-xl"></i>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div 
+                              className={`border rounded-lg p-4 cursor-pointer ${
+                                field.value === 'apple' ? 'border-gold bg-gold-light/20' : 'border-gray-200 hover:border-gold'
+                              }`}
+                              onClick={() => field.onChange('apple')}
+                            >
+                              <div className="flex items-center">
+                                <div className={`w-5 h-5 rounded-full border flex-shrink-0 mr-3 ${
+                                  field.value === 'apple' ? 'border-gold bg-gold' : 'border-gray-300'
+                                }`}></div>
+                                <div className="flex items-center">
+                                  <span className="font-medium mr-3">Apple Pay</span>
+                                  <i className="ri-apple-line text-gray-400 text-xl"></i>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                  
+                  <div className="pt-6">
+                    <Button 
+                      type="submit" 
+                      className="w-full bg-gold hover:bg-gold-dark text-white font-medium py-3 rounded-lg transition-colors"
+                      disabled={isSubmitting}
+                    >
+                      {isSubmitting ? (
+                        <span className="flex items-center justify-center">
+                          <i className="ri-loader-4-line animate-spin mr-2"></i>
+                          Processing Order...
+                        </span>
+                      ) : (
+                        `Complete Order • ${formatCurrency(total)}`
+                      )}
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </div>
+          </div>
+          
+          <div className="lg:col-span-1">
+            <div className="bg-white rounded-lg shadow-sm p-6 sticky top-24">
+              <h2 className="text-xl font-medium mb-6">Order Summary</h2>
+              
+              <div className="mb-6 max-h-80 overflow-y-auto custom-scrollbar">
+                {cartItems.map((item) => (
+                  <div key={item.id} className="flex mb-4 pb-4 border-b last:border-b-0">
+                    <div className="w-16 h-16 rounded-md overflow-hidden mr-3 flex-shrink-0">
+                      <img 
+                        src={item.product?.images[0]} 
+                        alt={item.product?.name} 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <div className="flex-grow">
+                      <h3 className="font-medium text-sm">{item.product?.name}</h3>
+                      {item.variant && (
+                        <p className="text-xs text-gray-500">{item.variant}</p>
+                      )}
+                      <div className="flex justify-between mt-1">
+                        <span className="text-xs text-gray-500">Qty: {item.quantity}</span>
+                        <span className="font-medium text-sm">
+                          {formatCurrency((item.product?.price || 0) * item.quantity)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="space-y-4 mb-6">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Subtotal</span>
+                  <span className="font-medium">{formatCurrency(subtotal)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Shipping</span>
+                  <span className="font-medium">
+                    {shipping === 0 ? 'Free' : formatCurrency(shipping)}
+                  </span>
+                </div>
+                <div className="border-t pt-4 mt-4">
+                  <div className="flex justify-between font-bold">
+                    <span>Total</span>
+                    <span>{formatCurrency(total)}</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Including taxes and duties
+                  </p>
+                </div>
+              </div>
+              
+              <div className="pt-4 border-t text-sm text-gray-500">
+                <p className="mb-2">
+                  <i className="ri-shield-check-line mr-1 text-gold"></i>
+                  Secure Checkout
+                </p>
+                <p className="mb-2">
+                  <i className="ri-truck-line mr-1 text-gold"></i>
+                  Free shipping on orders over $500
+                </p>
+                <p>
+                  <i className="ri-lock-line mr-1 text-gold"></i>
+                  SSL Encrypted Payment
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default CheckoutPage;
